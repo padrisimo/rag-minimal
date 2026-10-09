@@ -9,8 +9,8 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 
-from rag_minimal import RAG, Chunk, chunk_text, load_documents, tokenize
-from rag_minimal.text import _stem
+from src import RAG, Chunk, chunk_text, load_documents, tokenize
+from src.text import _stem
 
 PROJECT_DIR = Path(__file__).resolve().parent
 CLI = PROJECT_DIR / "cli.py"

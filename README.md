@@ -204,6 +204,7 @@ rag_minimal/
 cli.py         thin executable wrapper: ./cli.py
 test_rag.py    tests, using unittest
 MEMORY.md      project notes: constraints, decisions, known traps
+AGENTS.md      operational notes for coding agents
 docs/          sample documents (.md and .txt)
 pyproject.toml project metadata (no dependencies)
 .python-version interpreter pinned by uv
