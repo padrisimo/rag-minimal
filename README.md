@@ -13,38 +13,38 @@ Stdlib only: runs on Python 3.9+, needs neither `pip install` nor a connection.
 
 ### Running it
 
-With [uv](https://docs.astral.sh/uv/) (recommended — it provisions the
-interpreter from `.python-version`, so no setup is needed):
+`cli.py` is executable, and its shebang makes uv resolve the interpreter for
+you, so this just works from any directory:
 
 ```bash
-uv run python cli.py ask "how often should I water the cactus"
+./cli.py ask "how often should I water the cactus"
 ```
 
-Or with any Python 3.9+ on your PATH:
+Without uv, or if you prefer to be explicit:
 
 ```bash
-python3 cli.py ask "how often should I water the cactus"
+python3 cli.py ask "how often should I water the cactus"     # any Python 3.9+
+uv run python cli.py ask "how often should I water the cactus"  # uv, honours .python-version
 ```
 
-Everything below is written as `python3`; substitute `uv run python` if you
-prefer uv. Tests run the same way: `uv run python -m unittest`.
+Tests run the same way: `uv run python -m unittest`.
 
 ## Usage
 
 ```bash
-python3 cli.py index docs/              # index and save docs/index.json
-python3 cli.py ask "how often should I water the cactus"
-python3 cli.py ask "..." -k 5 --json    # 5 chunks, JSON output
-python3 cli.py chat docs/               # interactive session
+./cli.py index docs/                    # index and save docs/index.json
+./cli.py ask "how often should I water the cactus"
+./cli.py ask "..." -k 5 --json          # 5 chunks, JSON output
+./cli.py chat docs/                     # interactive session
 ```
 
 Typical output:
 
 ```
-$ python3 cli.py index docs/
+$ ./cli.py index docs/
 6 chunks · 242 terms · index written to docs/index.json
 
-$ python3 cli.py ask "how often should I water the cactus"
+$ ./cli.py ask "how often should I water the cactus"
 Question: how often should I water the cactus
 
 [1] score=0.235  watering.md "Watering the cactus"
@@ -82,7 +82,7 @@ for exactly that).
 instant:
 
 ```
-$ python3 cli.py chat docs/
+$ ./cli.py chat docs/
 Loaded 6 chunks from 242 terms (docs/index.json).
 Type /help for commands, /quit to leave.
 
@@ -147,9 +147,9 @@ IDF are recomputed on load.
 python3 -m unittest -v
 ```
 
-32 `unittest` tests: tokenization, stemming, chunking, L2 normalization,
-ordering, persistence round-trip, plus the CLI and the interactive session
-driven end-to-end through subprocess.
+33 `unittest` tests: tokenization, stemming, chunking, L2 normalization,
+ordering, persistence round-trip, plus the CLI, the interactive session, and
+the executable entry point, all driven end-to-end through subprocess.
 
 **Requires Python 3.9+.** Tested on 3.9.6 and 3.12.15.
 

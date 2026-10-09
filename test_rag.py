@@ -2,6 +2,8 @@
 
 import json
 import math
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -275,6 +277,27 @@ class TestChat(unittest.TestCase):
             chat = self.run_cli("chat", tmp, stdin="/quit\n")
             self.assertEqual(chat.returncode, 1)
             self.assertIn("No index at", chat.stderr)
+
+    def test_runs_as_an_executable_from_any_directory(self):
+        """The shebang must work, and docs/ must resolve next to cli.py, not cwd."""
+        cli = Path(__file__).parent / "cli.py"
+        self.assertTrue(os.access(cli, os.X_OK), "cli.py should be executable")
+        self.assertTrue(cli.read_text(encoding="utf-8").startswith("#!/usr/bin/env -S uv run --script"))
+
+        elsewhere = tempfile.mkdtemp()
+        try:
+            run = subprocess.run(
+                [str(cli), "ask", "how often to water the cactus", "-k", "1"],
+                capture_output=True,
+                text=True,
+                cwd=elsewhere,  # deliberately not the project directory
+                timeout=120,
+            )
+        finally:
+            shutil.rmtree(elsewhere, ignore_errors=True)
+
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("watering.md", run.stdout)
 
 
 if __name__ == "__main__":

@@ -13,38 +13,38 @@ Solo stdlib: funciona con Python 3.9+ y no necesita `pip install` ni conexión.
 
 ### Cómo ejecutarlo
 
-Con [uv](https://docs.astral.sh/uv/) (recomendado: aísla el intérprete desde
-`.python-version`, así que no hay nada que configurar):
+`cli.py` es ejecutable, y su shebang hace que uv resuelva el intérprete, así que
+esto funciona desde cualquier directorio:
 
 ```bash
-uv run python cli.py ask "how often should I water the cactus"
+./cli.py ask "how often should I water the cactus"
 ```
 
-O con cualquier Python 3.9+ en tu PATH:
+Sin uv, o si prefieres ser explícito:
 
 ```bash
-python3 cli.py ask "how often should I water the cactus"
+python3 cli.py ask "how often should I water the cactus"     # cualquier Python 3.9+
+uv run python cli.py ask "how often should I water the cactus"  # uv, respeta .python-version
 ```
 
-Todo lo de abajo está escrito con `python3`; sustituye por `uv run python` si
-prefieres uv. Los tests se ejecutan igual: `uv run python -m unittest`.
+Los tests se ejecutan igual: `uv run python -m unittest`.
 
 ## Uso
 
 ```bash
-python3 cli.py index docs/              # indexa y guarda docs/index.json
-python3 cli.py ask "how often should I water the cactus"
-python3 cli.py ask "..." -k 5 --json    # 5 fragmentos, salida JSON
-python3 cli.py chat docs/               # sesión interactiva
+./cli.py index docs/                    # indexa y guarda docs/index.json
+./cli.py ask "how often should I water the cactus"
+./cli.py ask "..." -k 5 --json          # 5 fragmentos, salida JSON
+./cli.py chat docs/                     # sesión interactiva
 ```
 
 Salida típica:
 
 ```
-$ python3 cli.py index docs/
+$ ./cli.py index docs/
 6 chunks · 242 terms · index written to docs/index.json
 
-$ python3 cli.py ask "how often should I water the cactus"
+$ ./cli.py ask "how often should I water the cactus"
 Question: how often should I water the cactus
 
 [1] score=0.235  watering.md "Watering the cactus"
@@ -82,7 +82,7 @@ en español como en inglés, así que también funciona con documentos en españ
 seguidas son instantáneas:
 
 ```
-$ python3 cli.py chat docs/
+$ ./cli.py chat docs/
 Loaded 6 chunks from 242 terms (docs/index.json).
 Type /help for commands, /quit to leave.
 
@@ -148,9 +148,9 @@ vectores e IDF se recalculan al cargar.
 python3 -m unittest -v
 ```
 
-32 tests con `unittest`: tokenización, stemming, troceo, normalización L2,
-ordenación, persistencia (ida y vuelta), más la CLI y la sesión interactiva
-probadas end-to-end por subprocess.
+33 tests con `unittest`: tokenización, stemming, troceo, normalización L2,
+ordenación, persistencia (ida y vuelta), más la CLI, la sesión interactiva y el
+punto de entrada ejecutable, todo probado end-to-end por subprocess.
 
 **Requiere Python 3.9+.** Probado en 3.9.6 y 3.12.15.
 

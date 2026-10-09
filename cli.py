@@ -1,10 +1,4 @@
-"""Minimal RAG CLI: `index` builds the index, `ask` queries it, `chat` loops.
-
-    python cli.py index docs/                 # index and save docs/index.json
-    python cli.py ask "how often to water"     # load the index and search
-    python cli.py ask "..." --json             # JSON output
-    python cli.py chat docs/                  # interactive session
-"""
+#!/usr/bin/env -S uv run --script
 
 from __future__ import annotations
 
@@ -18,6 +12,8 @@ from rag import DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP, DEFAULT_TOP_K, RAG, 
 
 PREVIEW_CHARS = 320
 QUIT_COMMANDS = frozenset({"/quit", "/exit", "/q", "salir"})
+PROJECT_DIR = Path(__file__).resolve().parent
+DEFAULT_DOCS = PROJECT_DIR / "docs"
 
 
 def _preview(text: str, limit: int = PREVIEW_CHARS) -> str:
@@ -26,7 +22,6 @@ def _preview(text: str, limit: int = PREVIEW_CHARS) -> str:
 
 
 def _resolve_index(args: argparse.Namespace) -> Path:
-    """Where to look for index.json: --index, else alongside `path`."""
     if args.index:
         return Path(args.index)
     root = Path(args.path)
@@ -108,7 +103,6 @@ def _sources(bot: RAG) -> str:
 
 
 def _number(raw: str, low: float, high: float, label: str) -> Optional[float]:
-    """Parse a command argument, or print why it is wrong and return None."""
     try:
         value = float(raw)
     except ValueError:
@@ -182,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ask = sub.add_parser("ask", help="search for the chunks relevant to a question")
     p_ask.add_argument("question", help="the question, in natural language")
-    p_ask.add_argument("path", nargs="?", type=Path, default=Path("docs"), help="folder containing index.json")
+    p_ask.add_argument("path", nargs="?", type=Path, default=DEFAULT_DOCS, help="folder containing index.json")
     p_ask.add_argument("--index", type=Path, help="explicit path to the index")
     p_ask.add_argument("-k", "--top", type=int, default=DEFAULT_TOP_K, help="number of chunks to return")
     p_ask.add_argument("--min-score", type=float, default=0.0, help="drop chunks scoring below this")
@@ -190,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.set_defaults(func=cmd_ask)
 
     p_chat = sub.add_parser("chat", help="interactive session: ask questions in a loop")
-    p_chat.add_argument("path", nargs="?", type=Path, default=Path("docs"), help="folder containing index.json")
+    p_chat.add_argument("path", nargs="?", type=Path, default=DEFAULT_DOCS, help="folder containing index.json")
     p_chat.add_argument("--index", type=Path, help="explicit path to the index")
     p_chat.add_argument("-k", "--top", type=int, default=DEFAULT_TOP_K, help="chunks per question (default 3)")
     p_chat.add_argument("--min-score", type=float, default=0.0, help="drop chunks scoring below this")
