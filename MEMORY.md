@@ -97,7 +97,7 @@ resolving against `Path(__file__).parent.parent`, not the cwd.
 
 ## Tests
 
-36 tests in `test_rag.py`, grouped by concern: tokenizer, chunker, vectors,
+39 tests in `test_rag.py`, grouped by concern: tokenizer, chunker, vectors,
 search, persistence, document loading, CLI, chat, executable entry point. All
 the subprocess-driven ones share `CLITestCase` and a `sample_index()` context
 manager.

@@ -63,6 +63,21 @@ class TestChunker(unittest.TestCase):
         self.assertEqual(chunks[1].heading, "Section")
         self.assertNotIn("#", " ".join(c.text for c in chunks))
 
+    def test_long_paragraph_is_split_at_the_cap(self):
+        chunks = chunk_text("word " * 400, "largo.md", max_chars=100, overlap=20)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(c.text) <= 130 for c in chunks), [len(c.text) for c in chunks])
+
+    def test_long_paragraph_without_spaces_still_splits(self):
+        chunks = chunk_text("x" * 250, "largo.md", max_chars=100, overlap=20)
+        self.assertEqual([len(c.text) for c in chunks], [100, 122, 72])
+        self.assertTrue(all(len(c.text) <= 122 for c in chunks))
+
+    def test_split_keeps_every_word(self):
+        body = "palabra " * 100
+        chunks = chunk_text(body, "largo.md", max_chars=90, overlap=0)
+        self.assertEqual("\n\n".join(c.text for c in chunks).split(), body.split())
+
     def test_hash_that_is_not_a_heading_stays_in_the_body(self):
         chunks = chunk_text("keep me\n\n#1 best deal today\n\ntail", "g.md")
         self.assertEqual(chunks[0].heading, "")

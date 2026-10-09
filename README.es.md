@@ -142,6 +142,7 @@ módulo:
 1. **Carga** — recorre el directorio y lee los `.txt`/`.md` (UTF-8, con fallback).
 2. **Troceo** — agrupa párrafos hasta `--chunk-chars` y solapa `--overlap`
    caracteres con el chunk anterior, para no partir una idea por la mitad.
+   Un párrafo más largo que el tope se parte por palabras.
    Los encabezados `#` no entran en el texto: se guardan como metadato `heading`.
 3. **Vectorización** — TF `(1 + log tf)` × IDF sobre unigrams y bigrams,
    normalizado en L2. Como ambos vectores están normalizados, el producto
@@ -169,7 +170,7 @@ uv run python -m rag_minimal ...  # uv, respeta .python-version
 python3 -m unittest -v
 ```
 
-36 tests con `unittest`: tokenización, stemming, troceo, normalización L2,
+39 tests con `unittest`: tokenización, stemming, troceo, normalización L2,
 ordenación, persistencia (ida y vuelta), más la CLI, la sesión interactiva y el
 punto de entrada ejecutable, todo probado end-to-end por subprocess.
 

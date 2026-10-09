@@ -37,6 +37,21 @@ def _carry_over(text: str, overlap: int) -> str:
     return tail
 
 
+def _split_paragraph(para: str, max_chars: int) -> list[str]:
+    if len(para) <= max_chars:
+        return [para]
+    pieces = []
+    while len(para) > max_chars:
+        cut = para.rfind(" ", 0, max_chars + 1)
+        if cut <= 0:
+            cut = max_chars
+        pieces.append(para[:cut])
+        para = para[cut:].lstrip()
+    if para:
+        pieces.append(para)
+    return pieces
+
+
 def chunk_text(
     text: str,
     source: str,
@@ -46,6 +61,7 @@ def chunk_text(
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     if not paragraphs:
         return []
+    paragraphs = [piece for para in paragraphs for piece in _split_paragraph(para, max_chars)]
 
     blocks: list[tuple[str, str]] = []
     heading = ""

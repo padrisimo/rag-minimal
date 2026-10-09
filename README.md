@@ -140,8 +140,9 @@ The code is split along the four pipeline stages, each in its own module:
 1. **Load** — walk the directory and read the `.txt`/`.md` files (UTF-8, with a
    fallback).
 2. **Chunk** — group paragraphs up to `--chunk-chars` and overlap `--overlap`
-   characters with the previous chunk, so an idea is not split in half. `#`
-   headings do not go into the text: they are kept as a `heading` metadata field.
+   characters with the previous chunk, so an idea is not split in half. A
+   paragraph longer than the cap is split on word boundaries. `#` headings do
+   not go into the text: they are kept as a `heading` metadata field.
 3. **Vectorize** — TF `(1 + log tf)` × IDF over unigrams and bigrams, L2
    normalized. Since both vectors are normalized, the dot product *is* the cosine.
 4. **Search** — score every chunk and return the best `k`. It iterates the
@@ -167,7 +168,7 @@ uv run python -m rag_minimal ...  # uv, honours .python-version
 python3 -m unittest -v
 ```
 
-36 `unittest` tests: tokenization, stemming, chunking, L2 normalization,
+39 `unittest` tests: tokenization, stemming, chunking, L2 normalization,
 ordering, persistence round-trip, plus the CLI, the interactive session, and
 the executable entry point, all driven end-to-end through subprocess.
 
