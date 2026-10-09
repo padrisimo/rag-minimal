@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Iterable
 
 DOC_EXTENSIONS = frozenset({".txt", ".md"})
+_HEADING_RE = re.compile(r"#{1,6}\s")
 
 DEFAULT_CHUNK_CHARS = 600
 DEFAULT_CHUNK_OVERLAP = 120
@@ -52,7 +53,7 @@ def chunk_text(
     buf_len = 0
 
     for para in paragraphs:
-        if para.startswith("#"):
+        if _HEADING_RE.match(para):
             if buf:
                 blocks.append((heading, "\n\n".join(buf)))
                 buf, buf_len = [], 0

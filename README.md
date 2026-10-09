@@ -167,7 +167,7 @@ uv run python -m rag_minimal ...  # uv, honours .python-version
 python3 -m unittest -v
 ```
 
-35 `unittest` tests: tokenization, stemming, chunking, L2 normalization,
+36 `unittest` tests: tokenization, stemming, chunking, L2 normalization,
 ordering, persistence round-trip, plus the CLI, the interactive session, and
 the executable entry point, all driven end-to-end through subprocess.
 

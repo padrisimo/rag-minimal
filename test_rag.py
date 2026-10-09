@@ -63,6 +63,11 @@ class TestChunker(unittest.TestCase):
         self.assertEqual(chunks[1].heading, "Section")
         self.assertNotIn("#", " ".join(c.text for c in chunks))
 
+    def test_hash_that_is_not_a_heading_stays_in_the_body(self):
+        chunks = chunk_text("keep me\n\n#1 best deal today\n\ntail", "g.md")
+        self.assertEqual(chunks[0].heading, "")
+        self.assertIn("#1 best deal today", chunks[0].text)
+
     def test_empty_text(self):
         self.assertEqual(chunk_text("   \n\n  ", "vacio.md"), [])
 
