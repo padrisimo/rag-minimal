@@ -1,20 +1,23 @@
-"""CLI del RAG mínimo: `index` construye el índice, `ask` consulta.
+"""Minimal RAG CLI: `index` builds the index, `ask` queries it, `chat` loops.
 
-    python cli.py index docs/                 # indexa y guarda docs/index.json
-    python cli.py ask "cada cuánto regar"       # carga el índice y busca
-    python cli.py ask "..." --json              # salida JSON
+    python cli.py index docs/                 # index and save docs/index.json
+    python cli.py ask "how often to water"     # load the index and search
+    python cli.py ask "..." --json             # JSON output
+    python cli.py chat docs/                  # interactive session
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import NoReturn, Optional, Sequence
 
-from rag import DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP, DEFAULT_TOP_K, RAG
+from rag import DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP, DEFAULT_TOP_K, RAG, Hit
 
 PREVIEW_CHARS = 320
+QUIT_COMMANDS = frozenset({"/quit", "/exit", "/q", "salir"})
 
 
 def _preview(text: str, limit: int = PREVIEW_CHARS) -> str:
@@ -22,68 +25,176 @@ def _preview(text: str, limit: int = PREVIEW_CHARS) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
 
 
-def cmd_index(args: argparse.Namespace) -> int:
+def _resolve_index(args: argparse.Namespace) -> Path:
+    """Where to look for index.json: --index, else alongside `path`."""
+    if args.index:
+        return Path(args.index)
     root = Path(args.path)
-    bot = RAG.index(root, chunk_chars=args.chunk_chars, overlap=args.overlap)
-    if not len(bot):
-        print(f"No encontré .txt/.md en {root}. Index vacío.", file=sys.stderr)
-        return 1
-
-    destination = Path(args.output) if args.output else root if root.is_dir() else root.parent
-    out = bot.save(destination / "index.json")
-    vocab = len(bot.idf)
-    print(f"{len(bot)} chunks · {vocab} términos · índice en {out}")
-    return 0
+    return root / "index.json" if root.is_dir() else root.parent / "index.json"
 
 
-def cmd_ask(args: argparse.Namespace) -> int:
-    index_path = Path(args.index) if args.index else Path(args.path) / "index.json" if Path(args.path).is_dir() else Path(args.path).parent / "index.json"
+def _die(message: str) -> NoReturn:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
 
-    if not index_path.exists():
-        print(f"No existe el índice {index_path}. Ejecuta primero: python cli.py index <carpeta>", file=sys.stderr)
-        return 1
 
-    bot = RAG.load(index_path)
-    hits = bot.search(args.question, top_k=args.top, min_score=args.min_score)
+def _load(path: Path) -> RAG:
+    if not path.exists():
+        _die(f"No index at {path}. Run first: python cli.py index <dir>")
+    return RAG.load(path)
 
-    if args.json:
-        import json
 
-        print(json.dumps({"question": args.question, "hits": [h.to_dict() for h in hits]}, ensure_ascii=False, indent=2))
-        return 0 if hits else 1
-
-    if not hits:
-        print(f"Sin coincidencias para: {args.question}")
-        print("Pista: sin bigrams ni sinónimos, una pregunta muy distinta al texto no encontrará nada.")
-        return 1
-
-    print(f'Pregunta: {args.question}\n')
+def _print_hits(hits: Sequence[Hit], question: str, top_k: int) -> None:
+    print(f"Question: {question}\n")
     for position, hit in enumerate(hits, 1):
         title = f'"{hit.heading}"' if hit.heading else ""
         print(f"[{position}] score={hit.score:.3f}  {hit.source} {title}".rstrip())
         print(f"    {_preview(hit.text)}\n")
+    if len(hits) == top_k:
+        print(f"Showing the top {top_k}. Use -k for more.\n")
+
+
+def cmd_index(args: argparse.Namespace) -> int:
+    root = Path(args.path)
+    bot = RAG.index(root, chunk_chars=args.chunk_chars, overlap=args.overlap)
+    if not len(bot):
+        _die(f"No .txt/.md found in {root}. Empty index.")
+
+    destination = Path(args.output) if args.output else root if root.is_dir() else root.parent
+    out = bot.save(destination / "index.json")
+    print(f"{len(bot)} chunks · {len(bot.idf)} terms · index written to {out}")
     return 0
 
 
+def cmd_ask(args: argparse.Namespace) -> int:
+    bot = _load(_resolve_index(args))
+    hits = bot.search(args.question, top_k=args.top, min_score=args.min_score)
+
+    if args.json:
+        print(json.dumps({"question": args.question, "hits": [h.to_dict() for h in hits]}, ensure_ascii=False, indent=2))
+        return 0 if hits else 1
+
+    if not hits:
+        print(f"No matches for: {args.question}")
+        print("Hint: without bigrams or synonyms, a question worded very differently from the text will find nothing.")
+        return 1
+
+    _print_hits(hits, args.question, args.top)
+    return 0
+
+
+def _help_text(bot: RAG) -> str:
+    return "\n".join(
+        [
+            "Commands:",
+            "  /sources        list the indexed documents, with chunk counts",
+            "  /top N          change how many chunks each question returns",
+            "  /min-score N    drop hits scoring below N (0.00 - 1.00)",
+            "  /help           show this help",
+            "  /quit           leave (Ctrl-D or Ctrl-C works too)",
+            "",
+            "Anything else is treated as a question.",
+        ]
+    )
+
+
+def _sources(bot: RAG) -> str:
+    counts: dict[str, int] = {}
+    for chunk in bot.chunks:
+        counts[chunk.source] = counts.get(chunk.source, 0) + 1
+    lines = [f"{len(bot)} chunks from {len(counts)} files:"]
+    lines += [f"  {source}  ({count} chunks)" for source, count in sorted(counts.items())]
+    return "\n".join(lines)
+
+
+def _number(raw: str, low: float, high: float, label: str) -> Optional[float]:
+    """Parse a command argument, or print why it is wrong and return None."""
+    try:
+        value = float(raw)
+    except ValueError:
+        print(f"{label} must be a number, got: {raw!r}")
+        return None
+    if not low <= value <= high:
+        print(f"{label} must be between {low:g} and {high:g}, got: {value:g}")
+        return None
+    return value
+
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    index_path = _resolve_index(args)
+    bot = _load(index_path)
+    top_k, min_score = args.top, args.min_score
+
+    print(f"Loaded {len(bot)} chunks from {len(bot.idf)} terms ({index_path}).")
+    print(f"Type /help for commands, /quit to leave.\n")
+
+    while True:
+        try:
+            line = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nBye.")
+            return 0
+
+        if not line:
+            continue
+        if line.lower() in QUIT_COMMANDS:
+            print("Bye.")
+            return 0
+
+        if line.startswith("/"):
+            command, _, argument = line.partition(" ")
+            command, argument = command.lower(), argument.strip()
+            if command == "/help":
+                print(_help_text(bot))
+            elif command == "/sources":
+                print(_sources(bot))
+            elif command == "/top":
+                value = _number(argument, 1, 50, "top")
+                if value is not None:
+                    top_k = int(value)
+                    print(f"top_k = {top_k}")
+            elif command == "/min-score":
+                value = _number(argument, 0.0, 1.0, "min-score")
+                if value is not None:
+                    min_score = value
+                    print(f"min_score = {min_score:g}")
+            else:
+                print(f"Unknown command: {command} (try /help)")
+            continue
+
+        hits = bot.search(line, top_k=top_k, min_score=min_score)
+        if not hits:
+            print("No matches. Try different wording, or /sources to see what is indexed.\n")
+        else:
+            _print_hits(hits, line, top_k)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="RAG mínimo con TF-IDF: recupera fragmentos de .txt/.md")
+    parser = argparse.ArgumentParser(description="Minimal RAG with TF-IDF: retrieves chunks from .txt/.md files")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_index = sub.add_parser("index", help="indexa un archivo o directorio")
-    p_index.add_argument("path", type=Path, help="directorio con .txt/.md (o un solo archivo)")
-    p_index.add_argument("-o", "--output", type=Path, help="directorio donde escribir index.json")
-    p_index.add_argument("--chunk-chars", type=int, default=DEFAULT_CHUNK_CHARS, help="tamaño máximo de chunk")
-    p_index.add_argument("--overlap", type=int, default=DEFAULT_CHUNK_OVERLAP, help="solape entre chunks")
+    p_index = sub.add_parser("index", help="index a file or directory")
+    p_index.add_argument("path", type=Path, help="directory with .txt/.md files (or a single file)")
+    p_index.add_argument("-o", "--output", type=Path, help="directory where index.json is written")
+    p_index.add_argument("--chunk-chars", type=int, default=DEFAULT_CHUNK_CHARS, help="maximum chunk size")
+    p_index.add_argument("--overlap", type=int, default=DEFAULT_CHUNK_OVERLAP, help="overlap between chunks")
     p_index.set_defaults(func=cmd_index)
 
-    p_ask = sub.add_parser("ask", help="busca fragmentos relevantes para una pregunta")
-    p_ask.add_argument("question", help="la pregunta en lenguaje natural")
-    p_ask.add_argument("path", nargs="?", type=Path, default=Path("docs"), help="carpeta con index.json")
-    p_ask.add_argument("--index", type=Path, help="ruta explícita del índice")
-    p_ask.add_argument("-k", "--top", type=int, default=DEFAULT_TOP_K, help="número de fragmentos")
-    p_ask.add_argument("--min-score", type=float, default=0.0, help="score mínimo para considerar un hit")
-    p_ask.add_argument("--json", action="store_true", help="salida en JSON")
+    p_ask = sub.add_parser("ask", help="search for the chunks relevant to a question")
+    p_ask.add_argument("question", help="the question, in natural language")
+    p_ask.add_argument("path", nargs="?", type=Path, default=Path("docs"), help="folder containing index.json")
+    p_ask.add_argument("--index", type=Path, help="explicit path to the index")
+    p_ask.add_argument("-k", "--top", type=int, default=DEFAULT_TOP_K, help="number of chunks to return")
+    p_ask.add_argument("--min-score", type=float, default=0.0, help="drop chunks scoring below this")
+    p_ask.add_argument("--json", action="store_true", help="JSON output")
     p_ask.set_defaults(func=cmd_ask)
+
+    p_chat = sub.add_parser("chat", help="interactive session: ask questions in a loop")
+    p_chat.add_argument("path", nargs="?", type=Path, default=Path("docs"), help="folder containing index.json")
+    p_chat.add_argument("--index", type=Path, help="explicit path to the index")
+    p_chat.add_argument("-k", "--top", type=int, default=DEFAULT_TOP_K, help="chunks per question (default 3)")
+    p_chat.add_argument("--min-score", type=float, default=0.0, help="drop chunks scoring below this")
+    p_chat.set_defaults(func=cmd_chat)
 
     return parser
 

@@ -1,4 +1,4 @@
-"""Tests con unittest (stdlib). Ejecuta: python -m unittest -v"""
+"""Tests using unittest (stdlib). Run: python -m unittest -v"""
 
 import json
 import math
@@ -6,12 +6,17 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
-from rag import RAG, Chunk, chunk_text, load_documents, tokenize
+from rag import RAG, Chunk, _stem, chunk_text, load_documents, tokenize
 
 
 class TestTokenizer(unittest.TestCase):
+    """Fixtures here are deliberately Spanish: they pin down the Spanish path
+    of the tokenizer (diacritics, stopwords, stemming) and the bilingual claim
+    in the README. English coverage lives in TestSearch."""
+
     def test_lowercase_and_diacritics(self):
         self.assertIn("intencion", tokenize("Intención"))
 
@@ -26,8 +31,17 @@ class TestTokenizer(unittest.TestCase):
     def test_stemming_unifies_plurals(self):
         self.assertEqual(tokenize("las plantas"), tokenize("planta"))
 
+    def test_stemming_unifies_english_plurals(self):
+        # The suffix list is Spanish-tuned; on English it is approximate, but it
+        # must still collapse regular plurals, or English docs would suffer.
+        for singular, plural in (("plant", "plants"), ("water", "waters"), ("week", "weeks")):
+            with self.subTest(plural=plural):
+                self.assertIn(_stem(plural), tokenize(plural))
+                self.assertEqual(tokenize(plural), tokenize(singular))
+
     def test_short_words_are_protected(self):
         self.assertIn("agua", tokenize("agua"))
+        self.assertIn("less", tokenize("less"))
 
     def test_unigrams_only_mode(self):
         self.assertNotIn("rieg_cactu", tokenize("riego del cactus", ngram_max=1))
@@ -35,15 +49,15 @@ class TestTokenizer(unittest.TestCase):
 
 class TestChunker(unittest.TestCase):
     def test_splits_and_numbers_chunks(self):
-        text = "\n\n".join(f"Parrafo {i} " + "palabra " * 40 for i in range(6))
+        text = "\n\n".join(f"Paragraph {i} " + "word " * 40 for i in range(6))
         chunks = chunk_text(text, "doc.md", max_chars=400, overlap=80)
         self.assertGreater(len(chunks), 1)
         self.assertEqual([c.id for c in chunks], list(range(len(chunks))))
 
     def test_heading_is_metadata_not_body(self):
-        chunks = chunk_text("# Guia\n\nCuerpo uno.\n\n## Seccion\n\nCuerpo dos.", "g.md")
-        self.assertEqual(chunks[0].heading, "Guia")
-        self.assertEqual(chunks[1].heading, "Seccion")
+        chunks = chunk_text("# Guide\n\nBody one.\n\n## Section\n\nBody two.", "g.md")
+        self.assertEqual(chunks[0].heading, "Guide")
+        self.assertEqual(chunks[1].heading, "Section")
         self.assertNotIn("#", " ".join(c.text for c in chunks))
 
     def test_empty_text(self):
@@ -142,26 +156,35 @@ class TestLoadDocuments(unittest.TestCase):
 
 
 class TestCLI(unittest.TestCase):
-    """Flujo completo: indexar por subprocess y consultar."""
+    """Full flow: index via subprocess, then query."""
 
-    def run_cli(self, *args):
+    def run_cli(self, *args, stdin=None):
         return subprocess.run(
             [sys.executable, str(Path(__file__).parent / "cli.py"), *args],
             capture_output=True,
             text=True,
+            input=stdin,
         )
 
-    def test_index_then_ask(self):
+    @contextmanager
+    def sample_index(self):
+        """A small indexed directory, cleaned up afterwards."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "docs"
             root.mkdir()
-            (root / "riego.md").write_text("# Cactus\n\nRegar el cactus cada dos semanas en verano.\n", encoding="utf-8")
+            (root / "watering.md").write_text(
+                "# Cactus\n\nWater the cactus every two weeks in summer.\n\n"
+                "# Ferns\n\nFerns need constant humidity indoors.\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(self.run_cli("index", str(root)).returncode, 0)
+            yield root
 
-            indexed = self.run_cli("index", str(root))
-            self.assertEqual(indexed.returncode, 0, indexed.stderr)
+    def test_index_then_ask(self):
+        with self.sample_index() as root:
             self.assertTrue((root / "index.json").exists())
 
-            asked = self.run_cli("ask", "cada cuanto regar el cactus", str(root), "--json")
+            asked = self.run_cli("ask", "how often to water the cactus", str(root), "--json")
             self.assertEqual(asked.returncode, 0, asked.stderr)
             hits = json.loads(asked.stdout)["hits"]
             self.assertTrue(hits)
@@ -170,9 +193,88 @@ class TestCLI(unittest.TestCase):
 
     def test_ask_without_index_fails_cleanly(self):
         with tempfile.TemporaryDirectory() as tmp:
-            asked = self.run_cli("ask", "algo", tmp)
+            asked = self.run_cli("ask", "something", tmp)
             self.assertEqual(asked.returncode, 1)
-            self.assertIn("No existe el índice", asked.stderr)
+            self.assertIn("No index at", asked.stderr)
+
+    def test_index_on_empty_directory_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            indexed = self.run_cli("index", tmp)
+            self.assertEqual(indexed.returncode, 1)
+            self.assertIn("Empty index", indexed.stderr)
+
+
+class TestChat(unittest.TestCase):
+    """The interactive loop, driven by piping stdin."""
+
+    def run_cli(self, *args, stdin):
+        return subprocess.run(
+            [sys.executable, str(Path(__file__).parent / "cli.py"), *args],
+            capture_output=True,
+            text=True,
+            input=stdin,
+            timeout=30,
+        )
+
+    @contextmanager
+    def sample_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "docs"
+            root.mkdir()
+            (root / "watering.md").write_text(
+                "# Cactus\n\nWater the cactus every two weeks in summer.\n\n"
+                "# Ferns\n\nFerns need constant humidity indoors.\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(self.run_cli("index", str(root), stdin="").returncode, 0)
+            yield root
+
+    def test_answers_a_question(self):
+        with self.sample_index() as root:
+            chat = self.run_cli("chat", str(root), stdin="how often to water the cactus\n/quit\n")
+            self.assertEqual(chat.returncode, 0, chat.stderr)
+            self.assertIn("Question: how often to water the cactus", chat.stdout)
+            self.assertIn("watering.md", chat.stdout)
+            self.assertIn("Bye.", chat.stdout)
+
+    def test_ctrl_d_exits_cleanly(self):
+        with self.sample_index() as root:
+            chat = self.run_cli("chat", str(root), stdin="")  # immediate EOF
+            self.assertEqual(chat.returncode, 0, chat.stderr)
+            self.assertIn("Bye.", chat.stdout)
+
+    def test_help_and_sources(self):
+        with self.sample_index() as root:
+            chat = self.run_cli("chat", str(root), stdin="/help\n/sources\n/quit\n")
+            self.assertIn("/sources", chat.stdout)
+            self.assertIn("watering.md  (2 chunks)", chat.stdout)
+
+    def test_top_command_limits_results(self):
+        with self.sample_index() as root:
+            chat = self.run_cli("chat", str(root), stdin="/top 1\nwater cactus humidity\n/quit\n")
+            self.assertIn("top_k = 1", chat.stdout)
+            self.assertEqual(chat.stdout.count("score="), 1)
+
+    def test_bad_command_arguments_do_not_crash(self):
+        with self.sample_index() as root:
+            chat = self.run_cli("chat", str(root), stdin="/top abc\n/min-score 5\n/nope\ncactus\n/quit\n")
+            self.assertEqual(chat.returncode, 0, chat.stderr)
+            self.assertIn("top must be a number", chat.stdout)
+            self.assertIn("min-score must be between", chat.stdout)
+            self.assertIn("Unknown command: /nope", chat.stdout)
+            self.assertIn("score=", chat.stdout)  # still usable afterwards
+
+    def test_no_match_does_not_exit_the_loop(self):
+        with self.sample_index() as root:
+            chat = self.run_cli("chat", str(root), stdin="zzzz qqqq\ncactus\n/quit\n")
+            self.assertIn("No matches.", chat.stdout)
+            self.assertIn("Bye.", chat.stdout)
+
+    def test_chat_without_index_fails_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chat = self.run_cli("chat", tmp, stdin="/quit\n")
+            self.assertEqual(chat.returncode, 1)
+            self.assertIn("No index at", chat.stderr)
 
 
 if __name__ == "__main__":

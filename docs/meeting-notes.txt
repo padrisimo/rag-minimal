@@ -1,0 +1,12 @@
+Meeting notes — March 12
+
+The budget approved for the quarter is 48,000 euros. The main infrastructure
+line item takes 60 percent of the total.
+
+The backend team is shrinking from four people to three starting in April. The
+design work is outsourced to an agency in Barcelona.
+
+The delivery date for version 1 stays: June 30, 2026.
+
+Open items: close the contract with the agency, migrate the customer database,
+and write the accessibility report.

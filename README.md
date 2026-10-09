@@ -1,74 +1,145 @@
 # rag-minimal
 
-RAG mínimo en Python, **sin dependencias externas y sin LLM**: indexa archivos
-`.txt`/`.md` y devuelve los fragmentos más relevantes para una pregunta.
+> English. La versión en español está en [README.es.md](README.es.md).
 
-Retirada por **TF-IDF + similitud coseno** (unigrams + bigrams, stopwords
-español/inglés, stemming ligero, sin acentos). Es la base sobre la que luego
-puedes añadir embeddings reales o un LLM sin tocar nada más.
+A minimal RAG in Python, **with no external dependencies and no LLM**: it indexes
+`.txt`/`.md` files and returns the chunks most relevant to a question.
 
-Solo stdlib: funciona con Python 3.9+ y no necesita `pip install` ni conexión.
+Retrieval is **TF-IDF + cosine similarity** (unigrams + bigrams, Spanish/English
+stopwords, light stemming, accent-insensitive). It is the base you can later add
+real embeddings or an LLM to, without touching anything else.
 
-## Uso
+Stdlib only: runs on Python 3.9+, needs neither `pip install` nor a connection.
+
+### Running it
+
+With [uv](https://docs.astral.sh/uv/) (recommended — it provisions the
+interpreter from `.python-version`, so no setup is needed):
 
 ```bash
-python3 cli.py index docs/              # indexa y guarda docs/index.json
-python3 cli.py ask "cada cuánto regar el cactus"
-python3 cli.py ask "..." -k 5 --json    # 5 fragmentos, salida JSON
+uv run python cli.py ask "how often should I water the cactus"
 ```
 
-Salida típica:
+Or with any Python 3.9+ on your PATH:
 
-```
-Pregunta: cada cuánto tengo que regar el cactus
-
-[1] score=0.167  riego.md "Riego del cactus"
-    El cactus necesita muy poca agua. Se riega cada dos semanas en verano…
+```bash
+python3 cli.py ask "how often should I water the cactus"
 ```
 
-Cada hit trae `source`, `heading` y `text`, así que siempre puedes citar de qué
-fragmento salió la información.
+Everything below is written as `python3`; substitute `uv run python` if you
+prefer uv. Tests run the same way: `uv run python -m unittest`.
 
-### Opciones
+## Usage
 
-| Comando | Opción | Default | Qué hace |
+```bash
+python3 cli.py index docs/              # index and save docs/index.json
+python3 cli.py ask "how often should I water the cactus"
+python3 cli.py ask "..." -k 5 --json    # 5 chunks, JSON output
+python3 cli.py chat docs/               # interactive session
+```
+
+Typical output:
+
+```
+$ python3 cli.py index docs/
+6 chunks · 242 terms · index written to docs/index.json
+
+$ python3 cli.py ask "how often should I water the cactus"
+Question: how often should I water the cactus
+
+[1] score=0.235  watering.md "Watering the cactus"
+    A cactus needs very little water. Water it every two weeks in summer and once a month in winter. The soil must dry out completely between waterings: if the substrate stays wet, the root rots.
+
+[2] score=0.073  watering.md "Substrates and drainage"
+    Succulents store water in their leaves, so they tolerate drought. The substrate must drain well: a mix of perlite, coarse sand and peat in a 2:1:1 ratio.
+```
+
+Every hit carries `source`, `heading` and `text`, so you can always cite which
+chunk the information came from.
+
+Note: the CLI messages and the bundled sample docs in `docs/` are in English,
+but the tokenizer is bilingual — it strips accents and filters both Spanish and
+English stopwords, so Spanish documents are handled too (there is a Spanish test
+for exactly that).
+
+### Options
+
+| Command | Option | Default | What it does |
 |---|---|---|---|
-| `index` | `--chunk-chars` | 600 | Tamaño máximo de chunk |
-| `index` | `--overlap` | 120 | Solape entre chunks consecutivos |
-| `index` | `-o` | dir de entrada | Carpeta donde escribir `index.json` |
-| `ask` | `-k` | 3 | Número de fragmentos a devolver |
-| `ask` | `--min-score` | 0.0 | Corta fragmentos por debajo del score |
-| `ask` | `--index` | `docs/index.json` | Ruta explícita del índice |
-| `ask` | `--json` | — | Salida JSON para integraciones |
+| `index` | `--chunk-chars` | 600 | Maximum chunk size |
+| `index` | `--overlap` | 120 | Overlap between consecutive chunks |
+| `index` | `-o` | input dir | Folder where `index.json` is written |
+| `ask` | `-k` | 3 | Number of chunks to return |
+| `ask` | `--min-score` | 0.0 | Drop chunks scoring below this |
+| `ask` | `--index` | `docs/index.json` | Explicit path to the index |
+| `ask` | `--json` | — | JSON output, for integrations |
+| `chat` | `-k` | 3 | Chunks per question |
+| `chat` | `--min-score` | 0.0 | Drop chunks scoring below this |
 
-## Como librería
+### Interactive session
+
+`chat` loads the index once and keeps it in memory, so follow-up questions are
+instant:
+
+```
+$ python3 cli.py chat docs/
+Loaded 6 chunks from 242 terms (docs/index.json).
+Type /help for commands, /quit to leave.
+
+you> how often should I water the cactus
+Question: how often should I water the cactus
+
+[1] score=0.235  watering.md "Watering the cactus"
+    A cactus needs very little water. Water it every two weeks in summer and once a month in winter. …
+
+you> /sources
+6 chunks from 2 files:
+  meeting-notes.txt  (1 chunks)
+  watering.md  (5 chunks)
+
+you> /quit
+Bye.
+```
+
+| Command | What it does |
+|---|---|
+| `/sources` | List the indexed documents, with chunk counts |
+| `/top N` | Change how many chunks each question returns |
+| `/min-score N` | Drop hits scoring below N (`0.00`–`1.00`) |
+| `/help` | Show the command list |
+| `/quit` | Leave (`Ctrl-D` and `Ctrl-C` work too) |
+
+Anything that is not a command is treated as a question. Bad arguments report
+the problem and leave the setting unchanged, rather than killing the session.
+
+## As a library
 
 ```python
 from pathlib import Path
 from rag import RAG
 
 bot = RAG.index(Path("docs"))
-for hit in bot.search("qué temperatura necesitan", top_k=3):
+for hit in bot.search("what temperature do they need", top_k=3):
     print(f"{hit.score:.3f}  {hit.location()}")
     print(hit.text)
 
-bot.save(Path("docs/index.json"))     # reindexar es barato: vuelve a indexar
+bot.save(Path("docs/index.json"))     # reindexing is cheap: just index again
 ```
 
-## Cómo funciona
+## How it works
 
-1. **Carga** — recorre el directorio y lee los `.txt`/`.md` (UTF-8, con fallback).
-2. **Troceo** — agrupa párrafos hasta `--chunk-chars` y solapa `--overlap`
-   caracteres con el chunk anterior, para no partir una idea por la mitad.
-   Los encabezados `#` no entran en el texto: se guardan como metadato `heading`.
-3. **Vectorización** — TF `(1 + log tf)` × IDF sobre unigrams y bigrams,
-   normalizado en L2. Como ambos vectores están normalizados, el producto
-   punto *es* el coseno.
-4. **Búsqueda** — puntúa todos los chunks y devuelve los `k` mejores.
-   Recorre el diccionario más corto de los dos, así que es bastante rápido.
+1. **Load** — walk the directory and read the `.txt`/`.md` files (UTF-8, with a
+   fallback).
+2. **Chunk** — group paragraphs up to `--chunk-chars` and overlap `--overlap`
+   characters with the previous chunk, so an idea is not split in half. `#`
+   headings do not go into the text: they are kept as a `heading` metadata field.
+3. **Vectorize** — TF `(1 + log tf)` × IDF over unigrams and bigrams, L2
+   normalized. Since both vectors are normalized, the dot product *is* the cosine.
+4. **Search** — score every chunk and return the best `k`. It iterates the
+   shorter of the two dicts, so it stays reasonably fast.
 
-`index.json` guarda solo el texto de los chunks (legible, versionable); los
-vectores e IDF se recalculan al cargar.
+`index.json` stores only the chunk text (readable, diff-friendly); vectors and
+IDF are recomputed on load.
 
 ## Tests
 
@@ -76,29 +147,37 @@ vectores e IDF se recalculan al cargar.
 python3 -m unittest -v
 ```
 
-23 tests con `unittest`: tokenización, stemming, troceo, normalización L2,
-ordenación, persistencia (ida y vuelta) y un test end-to-end de la CLI.
+32 `unittest` tests: tokenization, stemming, chunking, L2 normalization,
+ordering, persistence round-trip, plus the CLI and the interactive session
+driven end-to-end through subprocess.
 
-## Limitaciones (a propósito, para saber cuándo escalarlo)
+**Requires Python 3.9+.** Tested on 3.9.6 and 3.12.15.
 
-- **Sin sinónimos ni comprensión semántica**: "cada cuánto regar" no recupera un texto
-  que solo hable de "frecuencia de riego". TF-IDF compara palabras literales.
-- **Stemming muy simple**: unifica plurales y muchos sufijos (`riega`/`riego` sí
-  coinciden, `regar` no). No es Porter ni Snowball.
-- **Sin reranking ni MMR**: devuelve los `k` mejores aunque sean casi idénticos.
-- **Ida y vuelta a disco**: para cientos de miles de chunks, la carga del JSON
-  se nota; ahí toca SQLite o FAISS.
+## Limitations (on purpose, so you know when to scale up)
 
-Cuando no lleguen los hits: el salto de mayor rendimiento es cambiar `_vectorize`
-por embeddings reales (sentence-transformers u Ollama) manteniendo la interfaz de
-`RAG.search`; y para generar la respuesta final, concatenar los hits como
-contexto y llamarlos con un LLM.
+- **No synonyms, no semantic understanding**: "how often should I water" will not
+  retrieve a text that only talks about "watering frequency". TF-IDF compares
+  literal words.
+- **Very simple stemming**: it unifies plurals and many suffixes (`plant`/`plants`
+  do match, `watered` does not). It is Spanish-tuned, so it is approximate on
+  English too. It is not Porter, not Snowball.
+- **No reranking, no MMR**: it returns the best `k` even if they are nearly
+  identical.
+- **Disk round-trip**: for hundreds of thousands of chunks, loading the JSON
+  starts to hurt; that is when you reach for SQLite or FAISS.
 
-## Estructura
+When the hits stop being good enough: the biggest single jump is swapping
+`_vectorize` for real embeddings (sentence-transformers or Ollama) while keeping
+the `RAG.search` interface; and to produce the final answer, join the hits as
+context and call an LLM with them.
+
+## Layout
 
 ```
-rag.py        núcleo: tokenización, troceo, TF-IDF, búsqueda, persistencia
-cli.py        interfaz de línea de comandos (index / ask)
-test_rag.py   tests con unittest
-docs/         documentos de ejemplo (.md y .txt)
+rag.py        core: tokenization, chunking, TF-IDF, search, persistence
+cli.py        command-line interface (index / ask / chat)
+test_rag.py   tests, using unittest
+docs/         sample documents (.md and .txt)
+pyproject.toml project metadata (no dependencies)
+.python-version interpreter pinned by uv
 ```

@@ -1,17 +1,3 @@
-"""RAG mínimo sobre TF-IDF: indexa .txt/.md y recupera los fragmentos relevantes.
-
-Cero dependencias externas y sin LLM. La similitud coseno entre vectores
-TF-IDF (unigrams + bigrams, normalizados en L2) determina qué chunks se
-parecen más a la pregunta.
-
-Uso como librería:
-
-    from rag import RAG
-    bot = RAG.index(Path("docs"))
-    for hit in bot.search("cada cuanto regar", top_k=3):
-        print(hit.score, hit.source, hit.text[:80])
-"""
-
 from __future__ import annotations
 
 import json
@@ -33,10 +19,6 @@ DEFAULT_TOP_K = 3
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
-# Sufijos para un stemmer muy simple (el de Porter es mucho más elaborado).
-# Se recorren de más largo a más corto y nunca se deja un tallo de <4 letras,
-# así 'agua' y 'dos' quedan intactos. No unifica todas las conjugaciones
-# verbales: 'riega' y 'riego' sí coinciden, pero 'regar' no. Ver README.
 _SUFFIXES = (
     "amientos",
     "imientos",
@@ -60,7 +42,6 @@ _SUFFIXES = (
 )
 _MIN_STEM = 4
 
-# Stopwords (español + inglés) escritas ya normalizadas sin diacríticos.
 _STOPWORDS = frozenset(
     """
     a al algo algun alguna algunas alguno algunos ante antes aqui asi aun aunque
@@ -84,13 +65,11 @@ _STOPWORDS = frozenset(
 
 
 def _fold(text: str) -> str:
-    """Minúsculas y sin diacríticos, para que 'intención' ~ 'intencion'."""
     decomposed = unicodedata.normalize("NFKD", text.lower())
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
 def _stem(word: str) -> str:
-    """Quita el sufijo más largo que deje un tallo de al menos 4 letras."""
     for suffix in _SUFFIXES:
         if word.endswith(suffix) and len(word) - len(suffix) >= _MIN_STEM:
             return word[: -len(suffix)]
@@ -98,11 +77,6 @@ def _stem(word: str) -> str:
 
 
 def tokenize(text: str, ngram_max: int = 2) -> List[str]:
-    """Divide en tokens útiles: sin stopwords, sin 1-char, stemmed, con bigrams.
-
-    Los bigrams ('riego_cactus') evitan que una pregunta corta hecha de
-    palabras genéricas compita con todos los chunks del documento.
-    """
     words = [
         _stem(w)
         for w in _TOKEN_RE.findall(_fold(text))
@@ -117,11 +91,10 @@ def tokenize(text: str, ngram_max: int = 2) -> List[str]:
 
 @dataclass(frozen=True)
 class Chunk:
-    """Un fragmento indexable, con su procedencia para poder citarlo."""
 
     id: int
-    source: str  # ruta relativa al directorio indexado
-    heading: str  # encabezado markdown activo, o "" si no hay
+    source: str
+    heading: str
     text: str
 
     def to_dict(self) -> dict:
@@ -133,7 +106,6 @@ class Chunk:
 
 
 def _carry_over(text: str, overlap: int) -> str:
-    """Últimos `overlap` caracteres del chunk previo, sin cortar a media palabra."""
     if overlap <= 0 or not text:
         return ""
     if len(text) <= overlap:
@@ -151,11 +123,7 @@ def chunk_text(
     max_chars: int = DEFAULT_CHUNK_CHARS,
     overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> List[Chunk]:
-    """Trocea por párrafos: llena hasta `max_chars` y solapa con el anterior.
 
-    Los encabezados markdown no entran en el cuerpo del chunk; se guardan como
-    metadato `heading` para que cada hit salga con su sección de origen.
-    """
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     if not paragraphs:
         return []
@@ -195,12 +163,12 @@ def chunk_text(
 
 
 def load_documents(root: Path, extensions: Iterable[str] = DOC_EXTENSIONS) -> List[Tuple[str, str]]:
-    """Lee recursivamente los .txt/.md de `root`. Devuelve (ruta_relativa, texto)."""
+
     root = Path(root)
     if root.is_file():
         return [(root.name, root.read_text(encoding="utf-8", errors="replace"))]
     if not root.is_dir():
-        raise FileNotFoundError(f"no existe la ruta: {root}")
+        raise FileNotFoundError(f"path does not exist: {root}")
 
     allowed = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in extensions}
     docs: List[Tuple[str, str]] = []
@@ -213,7 +181,6 @@ def load_documents(root: Path, extensions: Iterable[str] = DOC_EXTENSIONS) -> Li
 
 @dataclass(frozen=True)
 class Hit:
-    """Un chunk recuperados, con su score de similitud coseno."""
 
     score: float
     chunk: Chunk
@@ -243,10 +210,6 @@ class Hit:
 
 
 class RAG:
-    """Índice TF-IDF en memoria, con búsqueda por coseno.
-
-    Construir con `RAG.index(Path("docs"))` y persistir con `save()`.
-    """
 
     INDEX_VERSION = 1
 
@@ -256,25 +219,22 @@ class RAG:
         self.idf = idf
         self.ngram_max = ngram_max
 
-    # ---------- construcción ----------
+    # ---------- building ----------
 
     @classmethod
     def from_chunks(cls, chunks: Sequence[Chunk], ngram_max: int = 2) -> "RAG":
-        """Calcula TF-IDF y los vectores L2-normalizados de cada chunk."""
         tokenized = [tokenize(c.text, ngram_max) for c in chunks]
         n = len(chunks) or 1
 
         df: Counter = Counter()
         for tokens in tokenized:
             df.update(set(tokens))
-        # IDF suavizado (variante de sklearn): siempre positivo, sin df == 0.
         idf = {term: math.log((1 + n) / (1 + count)) + 1.0 for term, count in df.items()}
         vectors = [cls._vectorize(tokens, idf) for tokens in tokenized]
         return cls(chunks, vectors, idf, ngram_max)
 
     @classmethod
     def index(cls, root: Path, chunk_chars: int = DEFAULT_CHUNK_CHARS, overlap: int = DEFAULT_CHUNK_OVERLAP, ngram_max: int = 2) -> "RAG":
-        """Indexa un archivo o un directorio entero de .txt/.md."""
         chunks: List[Chunk] = []
         for source, text in load_documents(root):
             chunks.extend(chunk_text(text, source, chunk_chars, overlap))
@@ -282,23 +242,21 @@ class RAG:
 
     @staticmethod
     def _vectorize(tokens: Sequence[str], idf: Dict[str, float]) -> Dict[str, float]:
-        """TF (1+log) * IDF sobre los términos del vocabulario, ya normalizado en L2."""
         raw = Counter(tokens)
         vec = {t: (1.0 + math.log(c)) * idf[t] for t, c in raw.items() if t in idf}
         norm = math.sqrt(sum(v * v for v in vec.values()))
         return {t: v / norm for t, v in vec.items()} if norm else {}
 
-    # ---------- búsqueda ----------
+    # ---------- search ----------
 
     def search(self, question: str, top_k: int = DEFAULT_TOP_K, min_score: float = 0.0) -> List[Hit]:
-        """Top-k chunks por coseno contra la pregunta (orden descendente)."""
+        """Top-k chunks by cosine similarity against the question (descending order)."""
         query = self._vectorize(tokenize(question, self.ngram_max), self.idf)
         if not query:
             return []
 
         scored: List[Tuple[float, int]] = []
         for i, vec in enumerate(self.vectors):
-            # Recorre el dict más corto: los bigrams hacen casi siempre la conexión.
             terms = vec.keys() & query.keys() if len(vec) < len(query) else query.keys() & vec.keys()
             score = sum(query[t] * vec[t] for t in terms)
             if score > min_score:
@@ -310,7 +268,7 @@ class RAG:
     def __len__(self) -> int:
         return len(self.chunks)
 
-    # ---------- persistencia ----------
+    # ---------- persistence ----------
 
     def to_dict(self) -> dict:
         return {
@@ -329,6 +287,6 @@ class RAG:
     def load(cls, path: Path) -> "RAG":
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         if raw.get("version") != cls.INDEX_VERSION:
-            raise ValueError(f"índice incompatible (v{raw.get('version')}, esperado v{cls.INDEX_VERSION}); vuelve a indexar")
+            raise ValueError(f"incompatible index (v{raw.get('version')}, expected v{cls.INDEX_VERSION}); reindex it")
         chunks = [Chunk.from_dict(c) for c in raw["chunks"]]
         return cls.from_chunks(chunks, int(raw.get("ngram_max", 2)))

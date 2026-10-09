@@ -1,0 +1,11 @@
+[project]
+name = "rag-minimal"
+version = "0.1.0"
+description = "Minimal RAG over TF-IDF: indexes .txt/.md and retrieves the relevant chunks"
+readme = "README.md"
+requires-python = ">=3.9"
+# No runtime dependencies on purpose: stdlib only.
+dependencies = []
+
+[tool.uv]
+package = false
