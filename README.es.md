@@ -117,7 +117,7 @@ matar la sesión.
 
 ```python
 from pathlib import Path
-from rag import RAG
+from rag_minimal import RAG
 
 bot = RAG.index(Path("docs"))
 for hit in bot.search("what temperature do they need", top_k=3):
@@ -128,6 +128,16 @@ bot.save(Path("docs/index.json"))     # reindexar es barato: vuelve a indexar
 ```
 
 ## Cómo funciona
+
+El código está partido según las cuatro etapas del pipeline, cada una en su
+módulo:
+
+| Etapa | Módulo | Qué hace |
+|---|---|---|
+| Tokenizar | `text.py` | Minúsculas, sin acentos, quita stopwords, stemmer, bigrams |
+| Cargar + trocear | `chunking.py` | Lee `.txt`/`.md` y trocea con solape |
+| Vectorizar + buscar | `index.py` | TF-IDF, similitud coseno, `save()`/`load()` |
+| Línea de comandos | `cli.py` | Los comandos `index` / `ask` / `chat` |
 
 1. **Carga** — recorre el directorio y lee los `.txt`/`.md` (UTF-8, con fallback).
 2. **Troceo** — agrupa párrafos hasta `--chunk-chars` y solapa `--overlap`
@@ -141,6 +151,17 @@ bot.save(Path("docs/index.json"))     # reindexar es barato: vuelve a indexar
 
 `index.json` guarda solo el texto de los chunks (legible, versionable); los
 vectores e IDF se recalculan al cargar.
+
+### Puntos de entrada
+
+La CLI se puede arrancar de cuatro formas equivalentes:
+
+```bash
+./cli.py ask "cactus"          # ejecutable; el shebang resuelve el intérprete
+python3 cli.py ask "cactus"    # cualquier Python 3.9+
+python -m rag_minimal ask ...  # como módulo
+uv run python -m rag_minimal ...  # uv, respeta .python-version
+```
 
 ## Tests
 
@@ -173,10 +194,22 @@ contexto y llamarlos con un LLM.
 ## Estructura
 
 ```
-rag.py        núcleo: tokenización, troceo, TF-IDF, búsqueda, persistencia
-cli.py        interfaz de línea de comandos (index / ask / chat)
-test_rag.py   tests con unittest
-docs/         documentos de ejemplo (.md y .txt)
+rag_minimal/
+  __init__.py     API pública: RAG, Hit, Chunk, tokenize, chunk_text, ...
+  __main__.py     habilita `python -m rag_minimal`
+  text.py         tokenización: folding, stemming, stopwords, bigrams
+  chunking.py     carga de documentos y troceo
+  index.py        índice TF-IDF, búsqueda por coseno, persistencia
+  commands.py     interfaz de línea de comandos (index / ask / chat)
+cli.py         wrapper ejecutable fino: ./cli.py
+test_rag.py    tests con unittest
+MEMORY.md      notas del proyecto: restricciones, decisiones, trampas conocidas
+docs/          documentos de ejemplo (.md y .txt)
 pyproject.toml metadatos del proyecto (sin dependencias)
 .python-version intérprete fijado por uv
 ```
+
+La división es por responsabilidad, no por tamaño: `text.py` no sabe nada de
+chunks, `chunking.py` no sabe nada de vectores, y `index.py` es el único punto
+donde se encuentran las tres etapas. Cambiar TF-IDF por embeddings reales exige
+reescribir solo `index.py`.

@@ -1,0 +1,12 @@
+{
+    "version": "2.0",
+    "agent": {
+        "system_prompt_extensions": [
+            "superpowers/architecture-planner"
+        ],
+        "tools": [
+            "superpowers/git-worktree-isolate",
+            "ponytail/code-compressor"
+        ]
+    }
+}

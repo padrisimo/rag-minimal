@@ -1,5 +1,3 @@
-"""Tests using unittest (stdlib). Run: python -m unittest -v"""
-
 import json
 import math
 import os
@@ -11,14 +9,19 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 
-from rag import RAG, Chunk, _stem, chunk_text, load_documents, tokenize
+from rag_minimal import RAG, Chunk, chunk_text, load_documents, tokenize
+from rag_minimal.text import _stem
+
+PROJECT_DIR = Path(__file__).resolve().parent
+CLI = PROJECT_DIR / "cli.py"
+
+SAMPLE_WATERING = (
+    "# Cactus\n\nWater the cactus every two weeks in summer.\n\n"
+    "# Ferns\n\nFerns need constant humidity indoors.\n"
+)
 
 
 class TestTokenizer(unittest.TestCase):
-    """Fixtures here are deliberately Spanish: they pin down the Spanish path
-    of the tokenizer (diacritics, stopwords, stemming) and the bilingual claim
-    in the README. English coverage lives in TestSearch."""
-
     def test_lowercase_and_diacritics(self):
         self.assertIn("intencion", tokenize("Intención"))
 
@@ -34,8 +37,6 @@ class TestTokenizer(unittest.TestCase):
         self.assertEqual(tokenize("las plantas"), tokenize("planta"))
 
     def test_stemming_unifies_english_plurals(self):
-        # The suffix list is Spanish-tuned; on English it is approximate, but it
-        # must still collapse regular plurals, or English docs would suffer.
         for singular, plural in (("plant", "plants"), ("water", "waters"), ("week", "weeks")):
             with self.subTest(plural=plural):
                 self.assertIn(_stem(plural), tokenize(plural))
@@ -157,31 +158,28 @@ class TestLoadDocuments(unittest.TestCase):
             self.assertEqual(load_documents(path), [("solo.md", "hola")])
 
 
-class TestCLI(unittest.TestCase):
-    """Full flow: index via subprocess, then query."""
-
-    def run_cli(self, *args, stdin=None):
+class CLITestCase(unittest.TestCase):
+    def run_cli(self, *args, stdin=None, cwd=None):
         return subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "cli.py"), *args],
+            [sys.executable, str(CLI), *args],
             capture_output=True,
             text=True,
             input=stdin,
+            cwd=cwd,
+            timeout=120,
         )
 
     @contextmanager
     def sample_index(self):
-        """A small indexed directory, cleaned up afterwards."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "docs"
             root.mkdir()
-            (root / "watering.md").write_text(
-                "# Cactus\n\nWater the cactus every two weeks in summer.\n\n"
-                "# Ferns\n\nFerns need constant humidity indoors.\n",
-                encoding="utf-8",
-            )
-            self.assertEqual(self.run_cli("index", str(root)).returncode, 0)
+            (root / "watering.md").write_text(SAMPLE_WATERING, encoding="utf-8")
+            self.assertEqual(self.run_cli("index", str(root), stdin="").returncode, 0)
             yield root
 
+
+class TestCLI(CLITestCase):
     def test_index_then_ask(self):
         with self.sample_index() as root:
             self.assertTrue((root / "index.json").exists())
@@ -205,32 +203,20 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(indexed.returncode, 1)
             self.assertIn("Empty index", indexed.stderr)
 
-
-class TestChat(unittest.TestCase):
-    """The interactive loop, driven by piping stdin."""
-
-    def run_cli(self, *args, stdin):
-        return subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "cli.py"), *args],
-            capture_output=True,
-            text=True,
-            input=stdin,
-            timeout=30,
-        )
-
-    @contextmanager
-    def sample_index(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "docs"
-            root.mkdir()
-            (root / "watering.md").write_text(
-                "# Cactus\n\nWater the cactus every two weeks in summer.\n\n"
-                "# Ferns\n\nFerns need constant humidity indoors.\n",
-                encoding="utf-8",
+    def test_module_entry_point(self):
+        with self.sample_index() as root:
+            run = subprocess.run(
+                [sys.executable, "-m", "rag_minimal", "ask", "cactus", str(root)],
+                capture_output=True,
+                text=True,
+                cwd=PROJECT_DIR,
+                timeout=120,
             )
-            self.assertEqual(self.run_cli("index", str(root), stdin="").returncode, 0)
-            yield root
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("watering.md", run.stdout)
 
+
+class TestChat(CLITestCase):
     def test_answers_a_question(self):
         with self.sample_index() as root:
             chat = self.run_cli("chat", str(root), stdin="how often to water the cactus\n/quit\n")
@@ -241,7 +227,7 @@ class TestChat(unittest.TestCase):
 
     def test_ctrl_d_exits_cleanly(self):
         with self.sample_index() as root:
-            chat = self.run_cli("chat", str(root), stdin="")  # immediate EOF
+            chat = self.run_cli("chat", str(root), stdin="")
             self.assertEqual(chat.returncode, 0, chat.stderr)
             self.assertIn("Bye.", chat.stdout)
 
@@ -264,7 +250,7 @@ class TestChat(unittest.TestCase):
             self.assertIn("top must be a number", chat.stdout)
             self.assertIn("min-score must be between", chat.stdout)
             self.assertIn("Unknown command: /nope", chat.stdout)
-            self.assertIn("score=", chat.stdout)  # still usable afterwards
+            self.assertIn("score=", chat.stdout)
 
     def test_no_match_does_not_exit_the_loop(self):
         with self.sample_index() as root:
@@ -278,19 +264,23 @@ class TestChat(unittest.TestCase):
             self.assertEqual(chat.returncode, 1)
             self.assertIn("No index at", chat.stderr)
 
+
+class TestExecutableEntryPoint(CLITestCase):
+    def test_shebang_and_exec_bit(self):
+        self.assertTrue(os.access(CLI, os.X_OK), "cli.py should be executable")
+        self.assertTrue(CLI.read_text(encoding="utf-8").startswith("#!/usr/bin/env -S uv run --script"))
+
     def test_runs_as_an_executable_from_any_directory(self):
-        """The shebang must work, and docs/ must resolve next to cli.py, not cwd."""
-        cli = Path(__file__).parent / "cli.py"
-        self.assertTrue(os.access(cli, os.X_OK), "cli.py should be executable")
-        self.assertTrue(cli.read_text(encoding="utf-8").startswith("#!/usr/bin/env -S uv run --script"))
+        indexed = self.run_cli("index", str(PROJECT_DIR / "docs"))
+        self.assertEqual(indexed.returncode, 0, indexed.stderr)
 
         elsewhere = tempfile.mkdtemp()
         try:
             run = subprocess.run(
-                [str(cli), "ask", "how often to water the cactus", "-k", "1"],
+                [str(CLI), "ask", "how often to water the cactus", "-k", "1"],
                 capture_output=True,
                 text=True,
-                cwd=elsewhere,  # deliberately not the project directory
+                cwd=elsewhere,
                 timeout=120,
             )
         finally:

@@ -116,7 +116,7 @@ the problem and leave the setting unchanged, rather than killing the session.
 
 ```python
 from pathlib import Path
-from rag import RAG
+from rag_minimal import RAG
 
 bot = RAG.index(Path("docs"))
 for hit in bot.search("what temperature do they need", top_k=3):
@@ -127,6 +127,15 @@ bot.save(Path("docs/index.json"))     # reindexing is cheap: just index again
 ```
 
 ## How it works
+
+The code is split along the four pipeline stages, each in its own module:
+
+| Stage | Module | Does |
+|---|---|---|
+| Tokenize | `text.py` | Lowercase, strip diacritics, drop stopwords, stem, add bigrams |
+| Load + chunk | `chunking.py` | Read `.txt`/`.md`, split into overlapping chunks |
+| Vectorize + search | `index.py` | TF-IDF, cosine similarity, `save()`/`load()` |
+| Command line | `cli.py` | The `index` / `ask` / `chat` commands |
 
 1. **Load** — walk the directory and read the `.txt`/`.md` files (UTF-8, with a
    fallback).
@@ -140,6 +149,17 @@ bot.save(Path("docs/index.json"))     # reindexing is cheap: just index again
 
 `index.json` stores only the chunk text (readable, diff-friendly); vectors and
 IDF are recomputed on load.
+
+### Entry points
+
+The CLI can be started four ways, all equivalent:
+
+```bash
+./cli.py ask "cactus"          # executable, shebang resolves the interpreter
+python3 cli.py ask "cactus"    # any Python 3.9+
+python -m rag_minimal ask ...  # as a module
+uv run python -m rag_minimal ...  # uv, honours .python-version
+```
 
 ## Tests
 
@@ -174,10 +194,22 @@ context and call an LLM with them.
 ## Layout
 
 ```
-rag.py        core: tokenization, chunking, TF-IDF, search, persistence
-cli.py        command-line interface (index / ask / chat)
-test_rag.py   tests, using unittest
-docs/         sample documents (.md and .txt)
+rag_minimal/
+  __init__.py     public API: RAG, Hit, Chunk, tokenize, chunk_text, ...
+  __main__.py     enables `python -m rag_minimal`
+  text.py         tokenization: folding, stemming, stopwords, bigrams
+  chunking.py     document loading and chunking
+  index.py        TF-IDF index, cosine search, persistence
+  commands.py     command-line interface (index / ask / chat)
+cli.py         thin executable wrapper: ./cli.py
+test_rag.py    tests, using unittest
+MEMORY.md      project notes: constraints, decisions, known traps
+docs/          sample documents (.md and .txt)
 pyproject.toml project metadata (no dependencies)
 .python-version interpreter pinned by uv
 ```
+
+The split is by responsibility, not size: `text.py` knows nothing about chunks,
+`chunking.py` knows nothing about vectors, and `index.py` is the only place the
+three stages meet. Swapping TF-IDF for real embeddings means rewriting
+`index.py` alone.
