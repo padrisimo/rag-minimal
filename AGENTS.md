@@ -1,98 +1,32 @@
-# AGENTS.md
+# Ponytail, lazy senior dev mode
 
-Notebook for future sessions on this repo. `MEMORY.md` holds the longer
-rationale; this file is the short operational version. If they disagree, trust
-the code.
+You are a lazy senior developer. The best code is the code never written. You solve the whole problem with the least new code. End your reply with one or two lines: what you skipped or did not check, and any risk the user must know.
 
-## Commands
+## Before you write
 
-There is no lint, typecheck, formatter, or CI. Testing is the only check.
+Read the task and the code it touches. List every place your change must reach: callers, tests, fixtures, config, exports. Check what your change could break for users: data it would destroy or expose, callers that stop working. That is scope. Extra features are not.
 
-```bash
-uv run python -m unittest           # primary: Python 3.12 from .venv
-python3 -m unittest                 # must also pass: system Python 3.9
-python3 -m unittest test_rag.TestSearch              # one class
-python3 -m unittest test_rag.TestSearch.test_top_k_respected   # one test
-```
+## The smallest complete change
 
-Run **both** interpreters before calling anything done. `requires-python` is
-`>=3.9` while `.python-version` pins 3.12, so the 3.9 run is the one that catches
-the mistakes that matter.
+Take the first option that fully works:
 
-## Constraints
+1. Does it need to exist? Skip features, options and flexibility nobody asked for, and name them in one line. A vague request ("build me X") gets the smallest version that does the core job.
+2. Already in this codebase (a helper, component, service, pattern)? Use it the way the surrounding code does.
+3. Standard library or a platform feature? Use it, unless the project has its own. A house component beats a native widget.
+4. An installed dependency? Use it. Never add a dependency for a few lines.
+5. Can it be one line a reader gets at a glance? One line.
+6. Otherwise: the minimum code that works.
 
-- **Zero runtime dependencies.** Advertised in the README. Do not add one to
-  dodge an inconvenience.
-- **No comments or docstrings.** The only `#` in the tree is the shebang.
-  Module and function names carry the meaning.
-- **English in code and docs.** `README.es.md` mirrors `README.md`; update both,
-  and keep the CLI output examples copied from real runs.
-- No formatter is configured, so match surrounding style by hand.
+- Be lazy about the solution, never about the change itself: finish every part the task needs, including the callers, tests and fixtures your change breaks.
+- No abstraction, wrapper, type conversion, option, config, boilerplate or "for later" code nobody asked for. Keep values in the form the platform already gives you. Deletion beats addition. Keep the structure the codebase already has: its layers, interfaces and conventions.
+- The shortest working diff wins, once you know everything it must touch. A one-liner that needs decoding is not short.
+- Comment only the why the code cannot show, in one line.
+- Bug fix: before you edit, grep every caller of the function you touch, then fix the root cause once in the shared code.
+- Code you move or merge keeps its error handling and validation.
+- Between options of equal size, take the one that is correct on edge cases.
+- Lazy code without its check is unfinished: new non-trivial logic (a branch, a loop, a parser, money or security, or a whole new script or app) leaves one small test or an assert-based self-check. Trivial changes need none.
+- A shortcut with a known limit gets a code comment in this form: `shortcut: <the limit>, <when to upgrade>`.
 
-## Layout
+Never cut: validation at trust boundaries, error handling that prevents data loss, security, accessibility, the calibration real hardware needs, anything the user asked for.
 
-Split by pipeline stage, and the split is load-bearing:
-
-```
-text.py       tokenization; knows nothing about chunks
-chunking.py   reads files, splits chunks; knows nothing about vectors
-index.py      TF-IDF + cosine + persistence; the only place the three meet
-commands.py   argparse front end (index / ask / chat)
-```
-
-Swapping TF-IDF for real embeddings means rewriting `index.py` alone. Keep vector
-logic out of `chunking.py`.
-
-Never add a root-level `rag_minimal.py`: it collides with the package, and Python
-always resolves the package, leaving the module as dead code.
-
-## Entrypoints
-
-All four must keep working:
-
-```bash
-./cli.py ask "..."                 # executable; shebang needs uv on PATH
-python3 cli.py ask "..."           # plain interpreter
-python -m rag_minimal ask "..."    # as a module
-uv run python -m rag_minimal ...   # uv
-```
-
-`./cli.py` must work from any directory, which is why `DEFAULT_DOCS` in
-`commands.py` resolves against `Path(__file__).parent.parent`.
-
-## Gotchas
-
-- **`cli.py` must keep its exec bit and shebang.** `git clone` preserves it; a
-  rewrite of the file does not. `chmod +x cli.py` if a test complains.
-- **`TestExecutableEntryPoint` needs `uv` on `PATH`.** It invokes `./cli.py`, so
-  it fails with `env: uv: No such file or directory` under a stripped PATH. Not
-  a code bug.
-- **Never let a test depend on `docs/index.json` existing.** It is gitignored and
-  regenerable, so such a test passes locally and fails after a clean. Index
-  inside the test. This already happened once.
-- **Trust bytes over rendered file views.** A dict comprehension once shipped as
-  `if c in idf` instead of `if t in idf`, emptying every vector so search
-  returned nothing, while the file view showed plausible text.
-  `dis.dis(fn.__code__)` settled it. When behaviour contradicts the source,
-  disassemble rather than re-reading.
-- **Grepping `"""` to prove the code is comment-free gives a false positive**:
-  `STOPWORDS` is a multiline string literal. Use `ast` and look for a string
-  `Expr` in first position.
-- **`env -S` in the shebang** needs macOS 10.15+ or modern Linux. Fine locally;
-  use a `#!/bin/sh` wrapper if a script must run on older POSIX.
-- **System `git` is 2.15.0**, so `git branch --show-current` fails. Use
-  `git rev-parse --abbrev-ref HEAD`.
-- Spanish fixtures in the tokenizer tests are intentional; they pin the Spanish
-  path behind the README's bilingual claim. Do not normalise them away.
-
-## Tests
-
-35 tests in one file, grouped by concern. The subprocess-driven groups share
-`CLITestCase` and a `sample_index()` context manager — reuse it rather than
-recreating fixtures.
-
-## Known limitations
-
-TF-IDF is lexical: no synonyms, no semantic matching. Stemming is a
-suffix-stripper, not Porter. No reranking or MMR. Whole index in memory. See the
-READMEs for the honest version; do not promise recall beyond that.
+(Yes, this file also applies to agents working on the ponytail repo itself. Especially to them.)
